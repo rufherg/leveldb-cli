@@ -319,6 +319,11 @@ func main() {
 						Aliases: []string{"n"},
 						Usage:   "do not overwrite an existing file",
 					},
+					&cli.BoolFlag{
+						Name:    "pretty",
+						Aliases: []string{"p"},
+						Usage:   "replace 0x00 characters to show pretty",
+					},
 				},
 				Action: dumpCmd,
 			},

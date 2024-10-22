@@ -6,11 +6,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"io"
-	"os"
-	"path"
-	"regexp"
-
 	"github.com/cions/leveldb-cli/indexeddb"
 	"github.com/fatih/color"
 	"github.com/syndtr/goleveldb/leveldb"
@@ -19,6 +14,10 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"github.com/urfave/cli/v2"
 	"github.com/vmihailenco/msgpack/v5"
+	"io"
+	"os"
+	"path"
+	"regexp"
 )
 
 var leveldbFilenamePattern = regexp.MustCompile(`\A(?:LOCK|LOG(?:\.old)?|CURRENT(?:\.bak|\.\d+)?|MANIFEST-\d+|\d+\.(?:ldb|log|sst|tmp))\z`)
@@ -472,7 +471,7 @@ func showCmd(c *cli.Context) error {
 	return nil
 }
 
-func dumpDB(dbpath string, cmp comparer.Comparer, w io.Writer) error {
+func dumpDB(dbpath string, cmp comparer.Comparer, w io.Writer, pretty bool) error {
 	db, err := leveldb.OpenFile(dbpath, &opt.Options{
 		Comparer:       cmp,
 		ErrorIfMissing: true,
@@ -515,11 +514,38 @@ func dumpDB(dbpath string, cmp comparer.Comparer, w io.Writer) error {
 		return err
 	}
 	for _, entry := range entries {
-		if err := enc.EncodeBytes(entry.Key); err != nil {
-			return err
-		}
-		if err := enc.EncodeBytes(entry.Value); err != nil {
-			return err
+		if pretty {
+			re, _ := regexp.Compile(`[\x00-\x1f\x7e-\xfd]`)
+			if len(entry.Key) > 7 && len(entry.Value) > 2 {
+				key := bytes.ReplaceAll(entry.Key, []byte{0x40, 0xff, 0xff}, []byte{})
+				key = bytes.ReplaceAll(key, []byte{0xff, 0x14, 0xff}, []byte{})
+
+				if _, err := w.Write(re.ReplaceAll(key, []byte(""))); err != nil {
+					return err
+				}
+				//if err := enc.EncodeBytes(re.ReplaceAll(key, []byte(""))); err != nil {
+				//	return err
+				//}
+			}
+			if len(entry.Value) > 14 {
+				value := bytes.ReplaceAll(entry.Value, []byte{0x40, 0xff, 0xff}, []byte{})
+				value = bytes.ReplaceAll(value, []byte{0x77, 0x42, 0x7b}, []byte{})
+
+				if _, err := w.Write(re.ReplaceAll(value, []byte(""))); err != nil {
+					return err
+				}
+				//if err := enc.EncodeBytes(re.ReplaceAll(value, []byte(""))); err != nil {
+				//	return err
+				//}
+				_, _ = w.Write([]byte{0x0a})
+			}
+		} else {
+			if err := enc.EncodeBytes(entry.Key); err != nil {
+				return err
+			}
+			if err := enc.EncodeBytes(entry.Value); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -619,7 +645,7 @@ func dumpCmd(c *cli.Context) error {
 		w = fh
 	}
 
-	return dumpDB(c.String("dbpath"), getComparer(c), w)
+	return dumpDB(c.String("dbpath"), getComparer(c), w, c.Bool("pretty"))
 }
 
 func loadCmd(c *cli.Context) error {
@@ -658,7 +684,7 @@ func compactCmd(c *cli.Context) error {
 	}
 	defer bak.Close()
 
-	if err := dumpDB(dbpath, cmp, bak); err != nil {
+	if err := dumpDB(dbpath, cmp, bak, false); err != nil {
 		bak.Close()
 		os.Remove(bakfile)
 		return err
